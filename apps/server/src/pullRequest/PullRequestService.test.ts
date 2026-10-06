@@ -2243,7 +2243,49 @@ it.effect("routes a hosted reference to another repository through a project on 
     );
 
     assert.strictEqual(summary.number, 7);
+    assert.strictEqual(summary.borrowedProject, true);
     assert.deepStrictEqual(seen, [{ cwd: "/web", repository: "acme/api", host: "github.com" }]);
+  }),
+);
+
+it.effect("reports a borrowed project so hand-offs do not check out into it", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      // The unrelated project comes first, which is the one the host fallback lends.
+      projects: [
+        project({
+          id: "unrelated",
+          title: "unrelated",
+          workspaceRoot: "/unrelated",
+          repository: "acme/unrelated",
+        }),
+        project({ id: "app", title: "app", workspaceRoot: "/app", repository: "acme/app" }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () => Effect.succeed(hostedChangeRequest("Description")),
+        }),
+      ],
+    });
+
+    // A link recorded before the repository was renamed matches no checkout, so the read borrows.
+    const renamed = yield* service.detail({
+      projectId: "app" as ProjectId,
+      host: "github.com",
+      repository: "old-org/app",
+      number: 1,
+    });
+    assert.strictEqual(renamed.projectId, "unrelated");
+    assert.strictEqual(renamed.borrowedProject, true);
+
+    const own = yield* service.detail({
+      projectId: "app" as ProjectId,
+      host: "github.com",
+      repository: "acme/app",
+      number: 1,
+    });
+    assert.strictEqual(own.projectId, "app");
+    assert.strictEqual(own.borrowedProject, undefined);
   }),
 );
 

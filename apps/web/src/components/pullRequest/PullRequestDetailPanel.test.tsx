@@ -50,7 +50,7 @@ vi.mock("~/state/pullRequests", async (importOriginal) => ({
 vi.mock("~/state/vcs", () => ({ vcsEnvironment: { listRefs: () => null } }));
 vi.mock("~/state/query", () => ({
   useEnvironmentQuery: (query: string) => ({
-    data: query === "detail" ? detail : null,
+    data: query === "detail" ? servedDetail : null,
     isPending: false,
     isSuccess: true,
     error: null,
@@ -141,6 +141,7 @@ vi.mock("./PullRequestCodeTab", () => ({
   ),
 }));
 
+import { toastManager } from "../ui/toast";
 import { PullRequestDetailPanel } from "./PullRequestDetailPanel";
 import { pullRequestPanelContext } from "./pullRequestDetail.logic";
 
@@ -196,6 +197,8 @@ const detail: PullRequestDetailView = {
   },
 };
 
+let servedDetail = detail;
+
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env-1"),
   threadId: ThreadId.make("thread-1"),
@@ -208,6 +211,8 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   useComposerDraftStore.setState({ draftsByThreadKey: {} });
+  servedDetail = detail;
+  vi.mocked(toastManager.add).mockClear();
   newThread
     .mockReset()
     .mockResolvedValue({ draftId: newDraftId, threadId: ThreadId.make("new-thread") });
@@ -335,4 +340,37 @@ describe.each([
       expect(newThread).toHaveBeenCalled();
     }
   });
+});
+
+describe("a pull request read through another project's credentials", () => {
+  it.each(["Resolve conflicts", "In a separate worktree"])(
+    "%s does not check out into the project that lent them",
+    async (action) => {
+      servedDetail = { ...detail, borrowedProject: true };
+      await act(async () => {
+        renderer = create(
+          <PullRequestDetailPanel
+            environmentId={threadRef.environmentId}
+            reference={detail}
+            context="page"
+            shortcutsEnabled={false}
+            getShortcutContext={() => ({
+              terminalFocus: false,
+              terminalOpen: false,
+              previewFocus: false,
+              previewOpen: false,
+              isWeb: true,
+              isDesktop: false,
+            })}
+          />,
+        );
+      });
+      await click(action);
+      expect(newThread).not.toHaveBeenCalled();
+      expect(prepareThread).not.toHaveBeenCalled();
+      expect(toastManager.add).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", title: "No checkout of this repository" }),
+      );
+    },
+  );
 });

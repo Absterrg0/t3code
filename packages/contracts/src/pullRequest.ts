@@ -728,6 +728,11 @@ export type PullRequestPreview = typeof PullRequestPreview.Type;
 export const PullRequestSummary = Schema.Struct({
   provider: SourceControlProviderKind,
   projectId: ProjectId,
+  /**
+   * Present when no project here is a checkout of `repository`: `projectId` only lent its
+   * credentials for the read, so nothing about this pull request should be checked out there.
+   */
+  borrowedProject: Schema.optional(Schema.Boolean),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -832,6 +837,11 @@ export const PullRequestDetail = Schema.Struct({
   projectId: ProjectId,
   projectTitle: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  /**
+   * Present when no project here is a checkout of `repository`: `projectId` only lent its
+   * credentials for the read, so nothing about this pull request should be checked out there.
+   */
+  borrowedProject: Schema.optional(Schema.Boolean),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   title: TrimmedNonEmptyString,

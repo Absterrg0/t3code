@@ -12,6 +12,7 @@ import type {
   PullRequestDetail,
   PullRequestMergeMethod,
   PullRequestRef,
+  PullRequestSummary,
 } from "@t3tools/contracts";
 import { useState } from "react";
 
@@ -124,8 +125,25 @@ export interface PullRequestThreadTask {
 /** What a hand-off needs to know about the pull request it is handing over. */
 export type PullRequestHandoffDetail = Pick<
   PullRequestDetail,
-  "projectId" | "workspaceRoot" | "url"
+  "projectId" | "workspaceRoot" | "url" | "repository" | "borrowedProject"
 >;
+
+/**
+ * Stops a checkout when the pull request was only read through another project's credentials.
+ * That project is not a checkout of the pull request's repository, so the branch, its worktree and
+ * the task would all land in an unrelated repository while the hand-off reported success.
+ */
+export function refuseBorrowedCheckout(
+  pullRequest: Pick<PullRequestSummary, "repository" | "borrowedProject">,
+): boolean {
+  if (pullRequest.borrowedProject !== true) return false;
+  toastManager.add({
+    type: "error",
+    title: "No checkout of this repository",
+    description: `No project here is a checkout of ${pullRequest.repository}. Add it as a project, then try again from there.`,
+  });
+  return true;
+}
 
 /**
  * What the last hand-off wrote into each draft, kept outside React because the panel that wrote it
@@ -239,6 +257,7 @@ export function usePullRequestHandoffs({
     mode: "worktree" | "local" = "worktree",
   ) => {
     if (!detail || handoff !== null) return;
+    if (refuseBorrowedCheckout(detail)) return;
     setHandoff(kind);
     // The menu closes on the press and takes its "Preparing..." label with it, so this is the
     // only thing answering for the checkout. It carries no timeout of its own: a loading toast

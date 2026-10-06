@@ -324,6 +324,8 @@ export interface SupportedProject {
    * Unique where `repository` is not: Azure's is a bare name that repeats across an organisation.
    */
   readonly remote: string;
+  /** Set when this project only lends its credentials to a repository it is not a checkout of. */
+  readonly borrowed?: true;
 }
 
 /**
@@ -383,6 +385,15 @@ function parseListCursor(raw: string): ListCursor | null {
     delivered: Number(match[2]),
     seenAt: seenAt === undefined ? [] : seenAt.split(",").map(Number),
   };
+}
+
+/** A held summary, minus the routing answer a fresher read decides again. */
+function withoutBorrowedProject(
+  summary: PullRequestSummary | undefined,
+): Omit<PullRequestSummary, "borrowedProject"> | undefined {
+  if (summary?.borrowedProject === undefined) return summary;
+  const { borrowedProject: _borrowedProject, ...rest } = summary;
+  return rest;
 }
 
 /**
@@ -889,6 +900,7 @@ export const make = Effect.gen(function* () {
                     ...route,
                     repository,
                     remote: normalizeGitRemoteUrl(`https://${host}/${repository}`),
+                    borrowed: true,
                   },
             );
           }),
@@ -1593,6 +1605,7 @@ export const make = Effect.gen(function* () {
           Effect.map(({ value: changeRequest, observedAt }): PullRequestSummary => ({
             provider: project.api.kind,
             projectId: project.project.id,
+            ...(project.borrowed ? { borrowedProject: true } : {}),
             repository: project.repository,
             number: changeRequest.number,
             title: changeRequest.title,
@@ -1686,6 +1699,7 @@ export const make = Effect.gen(function* () {
             projectId: project.project.id,
             projectTitle: project.project.title,
             workspaceRoot: project.project.workspaceRoot,
+            ...(project.borrowed ? { borrowedProject: true } : {}),
             repository: project.repository,
             number: changeRequest.number,
             title: changeRequest.title,
@@ -2945,9 +2959,10 @@ export const make = Effect.gen(function* () {
     previous: PullRequestSummary | undefined,
   ): PullRequestSummary => ({
     // Detail does not carry review/check summaries. Keep the last summary observation.
-    ...previous,
+    ...withoutBorrowedProject(previous),
     provider: detail.provider,
     projectId: detail.projectId,
+    ...(detail.borrowedProject ? { borrowedProject: true } : {}),
     repository: detail.repository,
     number: detail.number,
     title: detail.title,

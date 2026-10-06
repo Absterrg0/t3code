@@ -166,6 +166,7 @@ import {
   writePullRequestDetailSnapshot,
 } from "./pullRequestDetail.logic";
 import { canEditPullRequestChangeRequest } from "./pullRequestEditing.logic";
+import { refuseBorrowedCheckout } from "./usePullRequestActions";
 import {
   resolvePickableEnvironments,
   type PickableEnvironment,
@@ -1197,7 +1198,7 @@ export function PullRequestDetailPanel({
       });
       return;
     }
-    if (checkoutRoot === null) return;
+    if (checkoutRoot === null || refuseBorrowedCheckout(handoffSummary)) return;
     setHandoff(kind);
     // The menu closes on the press and takes its "Preparing..." label with it, so this is the
     // only thing answering for the checkout. It carries no timeout of its own: a loading toast
