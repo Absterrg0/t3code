@@ -910,6 +910,11 @@ export const make = Effect.gen(function* () {
                   candidate.api.kind !== "azure-devops" &&
                   candidate.repository.toLowerCase() === repository.toLowerCase(),
               ) ??
+              // No checkout carries that name, as after a rename. The project it was asked
+              // through is where the reader works, so it serves before any other on the host.
+              (own !== undefined && own.host === host && own.api.kind !== "azure-devops"
+                ? own
+                : undefined) ??
               onHost.find((candidate) => candidate.api.kind !== "azure-devops");
             if (route === undefined) {
               return Effect.fail(

@@ -2319,6 +2319,45 @@ it.effect("routes a hosted reference to another repository through a project on 
   }),
 );
 
+it.effect("routes a reference no checkout names through the project it was asked from", () =>
+  Effect.gen(function* () {
+    const seen: Array<string> = [];
+    const service = yield* makeService({
+      // The unrelated project was added first, which used to make it the one that served.
+      projects: [
+        project({
+          id: "unrelated",
+          title: "unrelated",
+          workspaceRoot: "/unrelated",
+          repository: "acme/unrelated",
+        }),
+        project({ id: "app", title: "app", workspaceRoot: "/app", repository: "acme/app" }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: (input) =>
+            Effect.sync(() => {
+              seen.push(input.cwd);
+              return hostedChangeRequest("Description");
+            }),
+        }),
+      ],
+    });
+
+    // A link recorded before the repository was renamed from old-org/app to acme/app.
+    const detail = yield* service.detail({
+      projectId: "app" as ProjectId,
+      host: "github.com",
+      repository: "old-org/app",
+      number: 1,
+    });
+
+    assert.strictEqual(detail.projectId, "app");
+    assert.strictEqual(detail.workspaceRoot, "/app");
+    assert.deepStrictEqual(seen, ["/app"]);
+  }),
+);
+
 it.effect("routes Azure reads and writes through the requested organization's checkout", () =>
   Effect.gen(function* () {
     const seen: string[] = [];

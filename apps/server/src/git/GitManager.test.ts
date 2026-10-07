@@ -1936,6 +1936,69 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     expect(GitManager.pullRequestRepositoryKey(url)).toBe(expected);
   });
 
+  const pullRequestAt = (url: string) =>
+    ({
+      number: 7,
+      title: "PR",
+      url,
+      baseBranch: "main",
+      headBranch: "fix/toggle",
+      state: "open",
+      isCrossRepository: true,
+      headRepositoryNameWithOwner: "contributor/app",
+    }) as const;
+
+  it.each([
+    [
+      "names the base repository",
+      "https://github.com/acme/app/pull/7",
+      ["https://github.com/acme/app.git"],
+      true,
+    ],
+    [
+      "names only the head's fork",
+      "https://github.com/acme/app/pull/7",
+      ["git@github.com:Contributor/app.git"],
+      true,
+    ],
+    [
+      "reaches the base through an SSH alias",
+      "https://github.com/acme/app/pull/7",
+      ["git@github-work:acme/app.git"],
+      true,
+    ],
+    [
+      "reaches an Azure repository over SSH",
+      "https://dev.azure.com/org/project/_git/app/pullrequest/7",
+      ["git@ssh.dev.azure.com:v3/org/project/app"],
+      true,
+    ],
+    [
+      "has only local paths",
+      "https://github.com/acme/app/pull/7",
+      ["/tmp/bare-remote", "../mirror/acme/app"],
+      true,
+    ],
+    ["has no remotes", "https://github.com/acme/app/pull/7", [], true],
+    [
+      "names an unrelated repository",
+      "https://github.com/acme/app/pull/7",
+      ["https://github.com/someone/unrelated.git", "../mirror/acme/app"],
+      false,
+    ],
+    [
+      "names an unrelated repository on Forgejo",
+      "https://code.example/acme/app/pulls/7",
+      ["git@code.example:someone/unrelated.git"],
+      false,
+    ],
+  ] as const)(
+    "decides whether a checkout that %s holds the PR",
+    (_name, url, remotes, expected) => {
+      expect(GitManager.isPullRequestCheckout(remotes, pullRequestAt(url))).toBe(expected);
+    },
+  );
+
   it.effect("distinguishes Enterprise forks with the same head branch", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -4694,6 +4757,48 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       });
       expect(ghCalls.some((call) => call.startsWith("pr view 42 "))).toBe(true);
     }),
+  );
+
+  it.effect.each(["local", "worktree"] as const)(
+    "refuses to check a pull request out in %s mode into a checkout of another repository",
+    (mode) =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, [
+          "remote",
+          "add",
+          "origin",
+          "https://github.com/someone/unrelated.git",
+        ]);
+
+        const { manager, ghCalls } = yield* makeManager({
+          ghScenario: {
+            pullRequest: {
+              number: 64,
+              title: "Another repository's PR",
+              url: "https://github.com/pingdotgg/codething-mvp/pull/64",
+              baseRefName: "main",
+              headRefName: "feature/elsewhere",
+              state: "open",
+            },
+          },
+        });
+
+        const error = yield* preparePullRequestThread(manager, {
+          cwd: repoDir,
+          reference: "https://github.com/pingdotgg/codething-mvp/pull/64",
+          mode,
+        }).pipe(Effect.flip);
+
+        if (error._tag !== "GitManagerError") return yield* Effect.die(error);
+        expect(error.detail).toContain("not a checkout of pingdotgg/codething-mvp");
+        expect(ghCalls.some((call) => call.startsWith("pr checkout"))).toBe(false);
+        const branches = (yield* runGit(repoDir, ["branch", "--format=%(refname:short)"])).stdout;
+        expect(branches.trim()).toBe("main");
+        const worktrees = (yield* runGit(repoDir, ["worktree", "list"])).stdout.trim().split("\n");
+        expect(worktrees).toHaveLength(1);
+      }),
   );
 
   it.effect("prepares pull request threads in local mode by checking out the PR branch", () =>

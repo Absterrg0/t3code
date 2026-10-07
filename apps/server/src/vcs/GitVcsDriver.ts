@@ -369,6 +369,10 @@ export class GitVcsDriver extends Context.Service<
       input: GitRefreshCheckedOutBranchInput,
     ) => Effect.Effect<GitRefreshCheckedOutBranchResult, GitCommandError>;
     readonly ensureRemote: (input: GitEnsureRemoteInput) => Effect.Effect<string, GitCommandError>;
+    /** Each remote's fetch URL, by remote name. */
+    readonly listRemoteUrls: (
+      cwd: string,
+    ) => Effect.Effect<ReadonlyMap<string, string>, GitCommandError>;
     readonly resolvePrimaryRemoteName: (cwd: string) => Effect.Effect<string, GitCommandError>;
     readonly resolveDefaultBranchName: (
       cwd: string,

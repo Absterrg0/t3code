@@ -51,10 +51,12 @@ import {
   sanitizeFeatureBranchName,
 } from "@t3tools/shared/git";
 import {
+  canonicalRepositoryKey,
   getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
   type ChangeRequestTerminology,
 } from "@t3tools/shared/sourceControl";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 
 import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -279,6 +281,37 @@ function resolveHeadRepositoryNameWithOwner(
   }
 
   return `${ownerLogin}/${repositoryName}`;
+}
+
+/**
+ * A repository's path below its host. The host is dropped because an SSH alias such as
+ * `git@github-work:` reaches the same repository under another name.
+ */
+function repositoryPathOf(key: string): string {
+  const canonical = canonicalRepositoryKey(key.toLowerCase());
+  return canonical.slice(canonical.indexOf("/") + 1);
+}
+
+/**
+ * Whether a checkout with these remotes holds the pull request's base or head repository. Only a
+ * definite mismatch answers no: a checkout whose remotes are all local paths, or a URL that names
+ * no repository, cannot tell, and is checked out as it always was.
+ */
+export function isPullRequestCheckout(
+  remoteUrls: Iterable<string>,
+  pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
+): boolean {
+  const link = parseChangeRequestUrl(pullRequest.url);
+  const remotes = Array.from(remoteUrls).flatMap((url) =>
+    // Local and relative paths name no hosted repository, so they are no evidence either way.
+    parseRepositoryNameWithOwnerFromRemoteUrl(url) === null
+      ? []
+      : [repositoryPathOf(normalizeGitRemoteUrl(url))],
+  );
+  if (link === null || remotes.length === 0) return true;
+  const base = repositoryPathOf(`${link.host}/${link.repository}`);
+  const head = resolveHeadRepositoryNameWithOwner(pullRequest)?.toLowerCase();
+  return remotes.some((remote) => remote === base || remote === head);
 }
 
 function resolvePullRequestWorktreeLocalBranchName(
@@ -2391,6 +2424,24 @@ export const make = Effect.gen(function* () {
         reference: normalizedReference,
       });
       const pullRequest = toResolvedPullRequest(pullRequestSummary);
+      const pullRequestWithRemoteInfo = {
+        ...pullRequest,
+        ...toPullRequestHeadRemoteInfo(pullRequestSummary),
+      } as const;
+
+      // A pull request can be read through any project on its host, so the one asked to check it
+      // out is not necessarily a checkout of it. Fetching it anyway would pull an unrelated
+      // history into that repository and hand its task to the wrong project.
+      const remoteUrls = yield* gitCore.listRemoteUrls(input.cwd);
+      if (!isPullRequestCheckout(remoteUrls.values(), pullRequestWithRemoteInfo)) {
+        const repository =
+          parseChangeRequestUrl(pullRequest.url)?.repository ?? "the pull request's repository";
+        return yield* new GitManagerError({
+          operation: "preparePullRequestThread",
+          cwd: input.cwd,
+          detail: `This project is not a checkout of ${repository}. Open the pull request from a project that is, or, if the repository was renamed, point this project's remote at its new name.`,
+        });
+      }
 
       if (input.mode === "local") {
         yield* (yield* sourceControlProvider(input.cwd)).checkoutChangeRequest({
@@ -2429,10 +2480,6 @@ export const make = Effect.gen(function* () {
         );
       });
 
-      const pullRequestWithRemoteInfo = {
-        ...pullRequest,
-        ...toPullRequestHeadRemoteInfo(pullRequestSummary),
-      } as const;
       const localPullRequestBranch =
         resolvePullRequestWorktreeLocalBranchName(pullRequestWithRemoteInfo);
 
